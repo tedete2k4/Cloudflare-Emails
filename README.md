@@ -1,168 +1,173 @@
-# Cloudflare-Emails
 📬 Cloudflare Worker Email Inbox
 
-Một Email Inbox tối giản nhưng mạnh mẽ, chạy 100% trên Cloudflare Workers, không cần server, không cần database truyền thống.
+A serverless email inbox built entirely on Cloudflare Workers, using Cloudflare Email Routing and Cloudflare KV.
 
-👉 Nhận email → lưu vào KV → xem qua web UI
-👉 Có login, search, đọc HTML email, giao diện đẹp, mobile friendly
+This project lets you receive emails, store them without a traditional database, and view them through a secure, modern web UI — all without running a server.
 
-✨ Tính năng
+✨ Features
 
-📥 Nhận email bằng Cloudflare Email Routing
+📥 Receive emails via Cloudflare Email Routing
 
-🗄️ Lưu email vào Cloudflare KV
+🗄️ Store emails in Cloudflare KV
 
-🔐 Login bảo vệ inbox bằng mật khẩu
+🔐 Password-protected inbox
 
-🔍 Search theo subject / sender
+🔍 Search emails by subject or sender
 
-🟢 Đánh dấu email mới / đã đọc
+🟢 Unread / read status
 
-⏱️ Hiển thị thời gian dạng 5 minutes ago
+⏱️ Human-friendly timestamps (5 minutes ago)
 
-📨 Xem Plain text / HTML email
+📨 View emails as Plain text or HTML
 
-🎨 Giao diện đẹp, responsive, không framework
+🎨 Clean, modern, responsive UI
 
-⚡ Deploy trực tiếp trên Cloudflare Dashboard
+⚡ Deploy directly from Cloudflare Dashboard
 
-🧱 Kiến trúc
-Email
-  ↓
+🚫 No VPS, no database server, no frontend framework
+
+🧱 Architecture Overview
+Incoming Email
+      ↓
 Cloudflare Email Routing
-  ↓
+      ↓
 Cloudflare Worker
-  ↓
-KV Namespace (EMAILS)
-  ↓
+      ↓
+Cloudflare KV (EMAILS)
+      ↓
 Web Inbox UI
 
-📦 Yêu cầu
+📦 Requirements
 
-Tài khoản Cloudflare
+A Cloudflare account
 
-Đã bật Workers
+Cloudflare Workers enabled
 
-Đã bật Email Routing
+Cloudflare Email Routing enabled
 
-Không cần:
+You do not need:
 
-VPS
+A VPS
 
-Database
+A traditional database
 
-Framework
+Node.js / NPM
 
-NPM
+Frontend frameworks
 
-🚀 Cách deploy (CHO NGƯỜI MỚI)
-1️⃣ Tạo Worker
+🚀 Deployment Guide (Beginner Friendly)
+1. Create a Worker
 
-Vào Cloudflare Dashboard
+Go to Cloudflare Dashboard
 
-Workers & Pages
+Navigate to Workers & Pages
 
-Create Worker
+Click Create Worker
 
-Đặt tên (ví dụ: email)
+Choose a name (e.g. email-inbox)
 
-Create
+Select HTTP handler
 
-2️⃣ Tạo KV Namespace
+Create the worker
 
-Workers & Pages → KV
+2. Create a KV Namespace
 
-Create namespace
+Go to Workers & Pages → KV
 
-Name:
+Click Create namespace
+
+Name it:
 
 EMAILS
 
-3️⃣ Gắn KV vào Worker
+3. Bind KV to the Worker
 
-Mở Worker vừa tạo
+Open your Worker
 
-Settings → Variables and Secrets
+Go to Settings → Variables and Secrets
 
-Mục KV Namespace Bindings
+Under KV Namespace Bindings, click Add
 
-Add:
+Fill in:
 
 Variable name: EMAILS
 
 Namespace: EMAILS
 
-Save and Deploy
+Click Save and Deploy
 
-4️⃣ Tạo mật khẩu login
+4. Set Inbox Password
 
-Trong Variables and Secrets:
+In Settings → Variables and Secrets, add an environment variable:
 
-Name	Value
-INBOX_PASSWORD	mật_khẩu_của_bạn
+INBOX_PASSWORD = your_password_here
 
-👉 Ví dụ:
+
+Example:
 
 INBOX_PASSWORD = 123456
 
 
-👉 Save and Deploy
+Then click Save and Deploy.
 
-5️⃣ Dán code Worker
+5. Deploy the Worker Code
 
-Mở tab Code Editor
+Open the Code tab of your Worker
 
-Xóa toàn bộ code mặc định
+Delete the default code
 
-Dán file worker.js trong repo này
+Paste the content of worker.js from this repository
 
-Save and Deploy
+Click Save and Deploy
 
-6️⃣ Bật Email Routing
+6. Enable Email Routing
 
-Email → Email Routing
+Go to Email → Email Routing
 
-Add destination → Worker
+Add a destination → choose Worker
 
-Chọn worker email-inbox
+Select your worker (e.g. email-inbox)
 
-Add rule:
+Add a rule:
 
 Any address → Worker
 
-👉 Gửi email thử tới domain của bạn
+Now send a test email to your domain.
 
-🧪 Kiểm tra hoạt động
-Truy cập inbox
+🧪 Usage
+Access the Inbox
 https://<worker-name>.<account>.workers.dev
 
 
-Chưa login → tự chuyển /login
+If not logged in → redirected to /login
 
-Nhập mật khẩu → vào inbox
+Enter the password → access inbox
 
-Gửi email test
+Send a Test Email
 
-Gửi email tới domain đã routing
+Send an email to your routed domain
 
-Reload inbox
+Reload the inbox page
 
-Email xuất hiện 🎉
+The email will appear instantly
 
-🔐 Bảo mật
+🔐 Security Notes
 
-Login bằng cookie auth=1
+Inbox is protected by a password
 
-Cookie HttpOnly
+Authentication uses an HttpOnly cookie (auth=1)
 
-HTML email render bằng:
+HTML emails are rendered inside:
 
 <iframe sandbox>
 
 
-→ Không chạy JS, không truy cập cookie
+This prevents JavaScript execution and cookie access
 
-📁 Cấu trúc dữ liệu email (KV)
+📁 Email Data Structure (Stored in KV)
+
+Each email is stored as a JSON object:
+
 {
   "id": "1700000000000",
   "from": "user@gmail.com",
@@ -174,54 +179,41 @@ HTML email render bằng:
   "isRead": false
 }
 
-🛠️ Tuỳ chỉnh
-Đổi mật khẩu
+🛠️ Customization
 
-Chỉ cần sửa INBOX_PASSWORD trong Dashboard
+Change password
+Update INBOX_PASSWORD in Cloudflare Dashboard — no code change required
 
-Không cần sửa code
+Customize UI
+All CSS is embedded inside the page() function in worker.js
 
-Đổi giao diện
+❌ Common Issues
+Inbox does not redirect to /login
 
-CSS nằm trong hàm page() trong worker.js
+Open the site in an incognito/private browser window
 
-❌ Lỗi thường gặp
-Website không vào /login
-
-👉 Mở tab ẩn danh hoặc clear cache
+Or clear browser cache
 
 Error 1101
 
-👉 Kiểm tra:
+Ensure KV namespace EMAILS is bound correctly
 
-KV đã bind chưa
+Verify the variable name is exactly EMAILS
 
-Variable EMAILS đúng tên chưa
+🧭 Roadmap Ideas
 
-📌 Roadmap (gợi ý)
+Pagination for large inboxes
 
-📄 Pagination
+Email attachments
 
-📎 Attachment
+Dark mode
 
-🌙 Dark mode
+Telegram / Discord notifications
 
-🔔 Telegram / Discord notify
-
-👥 Multi-user login
-
-🤝 Đóng góp
-
-Pull request và issue đều được chào đón 👍
-Repo phù hợp cho:
-
-Học Cloudflare Workers
-
-Email tooling
-
-Serverless inbox
+Multi-user authentication
 
 📄 License
 
 MIT License
-Sử dụng tự do cho cá nhân & thương mại
+
+Free to use, modify, and deploy for both personal and commercial projects.
