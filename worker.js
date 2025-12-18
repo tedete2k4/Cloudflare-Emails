@@ -1,23 +1,35 @@
 export default {
 
+  // =====================================================
+  //                  EMAIL HANDLER
+  // =====================================================
   async email(message, env) {
     if (!env.EMAILS) return;
 
     const id = Date.now().toString();
+    const from = message.from;
+    const to = message.to;
+    const subject = message.headers.get("subject") || "(No subject)";
+    const date = new Date().toISOString();
+
     const raw = await new Response(message.raw).text();
+    const { text, html } = parseEmail(raw);
 
     await env.EMAILS.put(id, JSON.stringify({
       id,
-      from: message.from,
-      to: message.to,
-      subject: message.headers.get("subject") || "(No subject)",
-      body: extractPart(raw, "text/plain") || raw,
-      htmlBody: extractPart(raw, "text/html"),
-      date: new Date().toISOString(),
+      from,
+      to,
+      subject,
+      body: text || "(No text content)",
+      htmlBody: html,
+      date,
       isRead: false
     }));
   },
 
+  // =====================================================
+  //                  HTTP HANDLER
+  // =====================================================
   async fetch(request, env) {
 
     if (!env.EMAILS) {
@@ -27,7 +39,7 @@ export default {
     const url = new URL(request.url);
     const params = url.searchParams;
 
-    // ========= AUTH =========
+    // ================= AUTH =================
     const cookieHeader = request.headers.get("Cookie") || "";
     const cookies = {};
     cookieHeader.split(";").forEach(c => {
@@ -44,11 +56,12 @@ export default {
       });
     }
 
-    // ========= LOGIN =========
+    // ================= LOGIN =================
     if (url.pathname === "/login") {
+
       if (request.method === "POST") {
-        const f = await request.formData();
-        if (f.get("password") === env.INBOX_PASSWORD) {
+        const form = await request.formData();
+        if (form.get("password") === env.INBOX_PASSWORD) {
           return new Response(null, {
             status: 302,
             headers: {
@@ -70,16 +83,22 @@ export default {
       `);
     }
 
-    // ========= DELETE =========
+    // ================= DELETE =================
     if (params.has("delete")) {
       await env.EMAILS.delete(params.get("delete"));
-      return new Response(null, { status: 302, headers: { Location: "/" }});
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "/" }
+      });
     }
 
-    // ========= VIEW =========
+    // ================= VIEW EMAIL =================
     if (params.has("view")) {
       const id = params.get("view");
-      const email = JSON.parse(await env.EMAILS.get(id));
+      const data = await env.EMAILS.get(id);
+      if (!data) return new Response("Not found", { status: 404 });
+
+      const email = JSON.parse(data);
 
       if (!email.isRead) {
         email.isRead = true;
@@ -91,14 +110,15 @@ export default {
 
         <div class="card">
           <h2>${esc(email.subject)}</h2>
+
           <div class="meta">
             <span>${esc(email.from)}</span>
             <span>${fmt(email.date)}</span>
           </div>
 
           <div class="actions">
-            <button onclick="plain()">Plain</button>
-            ${email.htmlBody ? `<button onclick="html()">HTML</button>` : ""}
+            <button onclick="showPlain()">Plain</button>
+            ${email.htmlBody ? `<button onclick="showHTML()">HTML</button>` : ""}
           </div>
 
           <pre id="plain" class="body">${esc(email.body)}</pre>
@@ -110,16 +130,16 @@ export default {
           ` : ""}
 
           <script>
-            const p=document.getElementById('plain');
-            const h=document.getElementById('html');
-            function plain(){p.style.display='block';h&&(h.style.display='none')}
-            function html(){p.style.display='none';h.style.display='block'}
+            const p = document.getElementById('plain');
+            const h = document.getElementById('html');
+            function showPlain(){ p.style.display='block'; if(h) h.style.display='none'; }
+            function showHTML(){ p.style.display='none'; h.style.display='block'; }
           </script>
         </div>
       `);
     }
 
-    // ========= LIST =========
+    // ================= LIST EMAILS =================
     const q = (params.get("q") || "").toLowerCase();
     const list = await env.EMAILS.list();
     let emails = [];
@@ -129,7 +149,7 @@ export default {
       if (e) emails.push(JSON.parse(e));
     }
 
-    emails.sort((a,b)=>b.id-a.id);
+    emails.sort((a, b) => b.id - a.id);
 
     if (q) {
       emails = emails.filter(e =>
@@ -147,10 +167,10 @@ export default {
       </header>
 
       <div class="list">
-        ${emails.length===0 ? `<div class="empty">No emails</div>` : ""}
+        ${emails.length === 0 ? `<div class="empty">No emails</div>` : ""}
 
-        ${emails.map(e=>`
-          <div class="item ${e.isRead?"":"unread"}">
+        ${emails.map(e => `
+          <div class="item ${e.isRead ? "" : "unread"}">
             <div>
               <a href="?view=${e.id}" class="subject">${esc(e.subject)}</a>
               <div class="from">${esc(e.from)}</div>
@@ -167,8 +187,52 @@ export default {
   }
 };
 
-// ================= UI PAGE =================
-function page(title, body){
+// =====================================================
+//                MIME PARSER (FIX)
+// =====================================================
+function parseEmail(raw) {
+  const boundaryMatch = raw.match(/boundary="([^"]+)"/i);
+  if (!boundaryMatch) {
+    return { text: raw, html: "" };
+  }
+
+  const boundary = boundaryMatch[1];
+  const parts = raw.split(`--${boundary}`);
+
+  let text = "";
+  let html = "";
+
+  for (const part of parts) {
+    if (/Content-Type:\s*text\/plain/i.test(part)) {
+      text = decodePart(part);
+    }
+    if (/Content-Type:\s*text\/html/i.test(part)) {
+      html = decodePart(part);
+    }
+  }
+
+  return { text, html };
+}
+
+function decodePart(part) {
+  const sections = part.split(/\r?\n\r?\n/);
+  if (sections.length < 2) return "";
+
+  let body = sections.slice(1).join("\n").trim();
+
+  if (/quoted-printable/i.test(part)) {
+    body = decodeQuotedPrintableUtf8(body);
+  } else if (/base64/i.test(part)) {
+    body = decodeBase64Utf8(body);
+  }
+
+  return body;
+}
+
+// =====================================================
+//                UI TEMPLATE
+// =====================================================
+function page(title, body) {
   return new Response(`
 <!DOCTYPE html>
 <html>
@@ -184,55 +248,46 @@ body{
   color:#111;
 }
 a{text-decoration:none;color:inherit}
-
 .center{
   min-height:100vh;
   display:flex;
   align-items:center;
   justify-content:center;
 }
-
 header{
   display:flex;
   justify-content:space-between;
   align-items:center;
   margin-bottom:20px;
 }
-
 header input{
   padding:8px 12px;
   border-radius:8px;
   border:1px solid #ddd;
 }
-
 .card{
   background:#fff;
   border-radius:14px;
   padding:20px;
   box-shadow:0 10px 30px rgba(0,0,0,.06);
 }
-
 .auth{
   width:300px;
   text-align:center;
 }
-
 .auth input{
   width:100%;
   padding:10px;
   margin:10px 0;
 }
-
 .auth button{
   width:100%;
 }
-
 .back{
   display:inline-block;
   margin-bottom:12px;
   color:#2563eb;
 }
-
 .meta{
   display:flex;
   justify-content:space-between;
@@ -240,11 +295,9 @@ header input{
   font-size:13px;
   margin-bottom:10px;
 }
-
 .actions button{
   margin-right:8px;
 }
-
 iframe{
   width:100%;
   height:600px;
@@ -252,56 +305,43 @@ iframe{
   margin-top:10px;
   display:none;
 }
-
 .body{
   white-space:pre-wrap;
   line-height:1.6;
 }
-
 .list{
   background:#fff;
   border-radius:14px;
   overflow:hidden;
   box-shadow:0 10px 30px rgba(0,0,0,.06);
 }
-
 .item{
   display:flex;
   justify-content:space-between;
   padding:14px 18px;
   border-bottom:1px solid #eee;
 }
-
 .item:hover{background:#f8fafc}
-
-.item.unread .subject{
-  font-weight:700;
-}
-
+.item.unread .subject{font-weight:700}
 .subject{display:block}
-
 .from{
   font-size:13px;
   color:#666;
 }
-
 .right{
   text-align:right;
   font-size:13px;
   color:#666;
 }
-
 .del{
   margin-left:10px;
   color:#dc2626;
 }
-
 .empty{
   padding:30px;
   text-align:center;
   color:#777;
 }
-
 button{
   padding:6px 12px;
   border-radius:8px;
@@ -318,37 +358,45 @@ ${body}
 </div>
 </body>
 </html>
-`,{headers:{"Content-Type":"text/html"}});
+`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-// ================= HELPERS =================
-const esc=s=>String(s||"").replace(/[&<>"]/g,m=>(
-  {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m]
-));
+// =====================================================
+//                HELPERS
+// =====================================================
+const esc = s => String(s || "").replace(/[&<>"]/g, m => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;"
+}[m]));
 
-const fmt=d=>new Date(d).toLocaleString("vi-VN");
+const fmt = d => new Date(d).toLocaleString("vi-VN");
 
-const rel=d=>{
-  const s=(Date.now()-new Date(d))/1000;
-  if(s<60)return"just now";
-  if(s<3600)return Math.floor(s/60)+" min ago";
-  if(s<86400)return Math.floor(s/3600)+" h ago";
-  return Math.floor(s/86400)+" days ago";
+const rel = d => {
+  const s = (Date.now() - new Date(d)) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + " min ago";
+  if (s < 86400) return Math.floor(s / 3600) + " h ago";
+  return Math.floor(s / 86400) + " days ago";
 };
 
-function extractPart(raw,type){
-  const m=raw.match(new RegExp(
-    `Content-Type:\\s*${type}[\\s\\S]*?\\n\\n([\\s\\S]*?)(\\n--)`,"i"
-  ));
-  return m?decodeQP(m[1].trim()):"";
+function decodeQuotedPrintableUtf8(input = "") {
+  input = input.replace(/=\r?\n/g, "");
+  const bytes = [];
+  for (let i = 0; i < input.length; i++) {
+    if (input[i] === "=") {
+      bytes.push(parseInt(input.substr(i + 1, 2), 16));
+      i += 2;
+    } else {
+      bytes.push(input.charCodeAt(i));
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
 }
 
-function decodeQP(s=""){
-  s=s.replace(/=\r?\n/g,"");
-  const b=[];
-  for(let i=0;i<s.length;i++){
-    if(s[i]=="="){b.push(parseInt(s.substr(i+1,2),16));i+=2}
-    else b.push(s.charCodeAt(i))
+function decodeBase64Utf8(input = "") {
+  const binary = atob(input.replace(/\s+/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
   }
-  return new TextDecoder().decode(new Uint8Array(b));
+  return new TextDecoder().decode(bytes);
 }
